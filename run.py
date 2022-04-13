@@ -3,6 +3,7 @@ import pandas as pd
 import re
 import string
 
+from keras import callbacks as keras_callbacks
 from keras import layers
 from keras import losses
 from keras import metrics
@@ -25,7 +26,7 @@ def filter_for_actual_words(word_list):
     # return [word for word in word_list if not re.search(r'^(?!rt)\w{1,2}$', word, flags=re.IGNORECASE)]
 
 def stem_words(word_list):
-    stemmer = SnowballStemmer("english", ignore_stopwords=True)
+    stemmer = SnowballStemmer('english', ignore_stopwords=True)
     return [stemmer.stem(word) for word in word_list]
 
 def find_useful_words(input):
@@ -51,27 +52,38 @@ if __name__ == '__main__':
     x_test = vectorizer.transform(test_df['final_text'])
     print(vectorizer.get_feature_names_out())
 
-    x_train, x_val, y_train, y_val = train_test_split(x_train.toarray(), train_df['target'], test_size=0.2, random_state=None)
+    x_train, x_val, y_train, y_val = train_test_split(x_train.toarray(), train_df['target'], random_state=42)
     input_shape = x_train.shape[1]
     print(f"x_train.shape: {input_shape}")
 
     model = models.Sequential([
-        layers.Dense(512, activation='relu', input_shape=(input_shape,)),
-        layers.Dropout(0.15),
-        layers.Dense(512, activation='relu'),
-        layers.Dropout(0.15),
+        layers.Dense(64, activation='relu', input_shape=(input_shape,)),
         layers.Dense(32, activation='relu'),
         layers.Dense(1, activation='sigmoid'),
     ])
 
     print(model.summary())
 
-    model.compile(optimizer=optimizers.RMSprop(learning_rate=0.001),
-              loss=losses.binary_crossentropy,
-              metrics=[metrics.binary_accuracy])
+    model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['binary_accuracy'])
+
+    early_stopping = keras_callbacks.EarlyStopping(
+        patience=20,
+        min_delta=0.001,
+        restore_best_weights=True,
+    )
 
     history = model.fit(x_train,
                     y_train,
-                    epochs=20,
+                    epochs=100,
                     batch_size=16,
+                    callbacks=[early_stopping],
                     validation_data=(x_val, y_val))
+
+    history_df = pd.DataFrame(history.history)
+    # history_df.loc[5:, ['loss', 'val_loss']].plot()
+    # history_df.loc[5:, ['binary_accuracy', 'val_binary_accuracy']].plot()
+
+    print(("Best Validation Loss: {:0.4f}" + "\nBest Validation Accuracy: {:0.4f}").format(
+        history_df['val_loss'].min(),
+        history_df['val_binary_accuracy'].max()
+    ))
