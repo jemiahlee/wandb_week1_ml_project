@@ -2,6 +2,7 @@ import nltk
 import pandas as pd
 import re
 import string
+import wandb
 
 from keras import callbacks as keras_callbacks
 from keras import layers
@@ -14,6 +15,7 @@ from nltk.tokenize import word_tokenize
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.model_selection import train_test_split
 from tensorflow.keras import optimizers
+from wandb.keras import WandbCallback
 
 nltk.download('punkt')
 nltk.download('stopwords')
@@ -31,6 +33,7 @@ def stem_words(word_list):
 
 def find_useful_words(input):
     words = re.sub(r'(?<=\d),(?=\d)', '', input)
+    words = re.sub(r'-', '', words)
     words = re.sub(r'[' + re.escape(string.punctuation) + ']', ' ', words)
     word_list = word_tokenize(words)
     word_list = filter_for_actual_words(word_list)
@@ -38,6 +41,8 @@ def find_useful_words(input):
     return ' '.join([word for word in stemmed_words if word not in stop_words])
 
 if __name__ == '__main__':
+    wandb.init(project='first_week')
+
     train_df = pd.read_csv('data/train.csv')
     test_df = pd.read_csv('data/test.csv')
 
@@ -56,9 +61,13 @@ if __name__ == '__main__':
     input_shape = x_train.shape[1]
     print(f"x_train.shape: {input_shape}")
 
+    l1 = 64
+    l2 = 32
+    wandb.config.update({'l1': l1, 'l2': l2})
+
     model = models.Sequential([
-        layers.Dense(64, activation='relu', input_shape=(input_shape,)),
-        layers.Dense(32, activation='relu'),
+        layers.Dense(wandb.config['l1'], activation='relu', input_shape=(input_shape,)),
+        layers.Dense(wandb.config['l2'], activation='relu'),
         layers.Dense(1, activation='sigmoid'),
     ])
 
@@ -67,7 +76,7 @@ if __name__ == '__main__':
     model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['binary_accuracy'])
 
     early_stopping = keras_callbacks.EarlyStopping(
-        patience=20,
+        patience=10,
         min_delta=0.001,
         restore_best_weights=True,
     )
@@ -76,10 +85,12 @@ if __name__ == '__main__':
                     y_train,
                     epochs=100,
                     batch_size=16,
-                    callbacks=[early_stopping],
+                    callbacks=[early_stopping, WandbCallback()],
                     validation_data=(x_val, y_val))
 
     history_df = pd.DataFrame(history.history)
+    wandb.log({'max_binary_accuracy': history_df['val_binary_accuracy'].max()})
+
     # history_df.loc[5:, ['loss', 'val_loss']].plot()
     # history_df.loc[5:, ['binary_accuracy', 'val_binary_accuracy']].plot()
 
