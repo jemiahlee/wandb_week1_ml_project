@@ -22,6 +22,16 @@ nltk.download('stopwords')
 
 stop_words = stopwords.words('english')
 
+defaults = dict(
+    batch_size=32,
+    dropout_1=0.2,
+    dropout_2=0.2,
+    epoch_count=27,
+    layer_1_size=16,
+    layer_2_size=32,
+    learn_rate=0.01,
+)
+
 
 def filter_for_actual_words(word_list):
     return [word for word in word_list if re.search(r'^[a-zA-Z\d]+$', re.sub(r'^[#@]', '', word))]
@@ -41,7 +51,7 @@ def find_useful_words(input):
     return ' '.join([word for word in stemmed_words if word not in stop_words])
 
 if __name__ == '__main__':
-    wandb.init(project='first_week')
+    wandb.init(project='first_week', config=defaults)
 
     train_df = pd.read_csv('data/train.csv')
     test_df = pd.read_csv('data/test.csv')
@@ -61,40 +71,36 @@ if __name__ == '__main__':
     input_shape = x_train.shape[1]
     print(f"x_train.shape: {input_shape}")
 
-    l1 = 64
-    l2 = 32
-    wandb.config.update({'l1': l1, 'l2': l2})
+    for epoch in range(wandb.config.epoch_count):
+        model = models.Sequential([
+            layers.Dense(wandb.config.layer_1_size, activation='relu', input_shape=(input_shape,)),
+            layers.Dropout(wandb.config.dropout_1),
+            layers.Dense(wandb.config.layer_2_size, activation='relu'),
+            layers.Dropout(wandb.config.dropout_2),
+            layers.Dense(1, activation='sigmoid'),
+        ])
 
-    model = models.Sequential([
-        layers.Dense(wandb.config['l1'], activation='relu', input_shape=(input_shape,)),
-        layers.Dense(wandb.config['l2'], activation='relu'),
-        layers.Dense(1, activation='sigmoid'),
-    ])
+        print(model.summary())
 
-    print(model.summary())
+        model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['binary_accuracy'])
 
-    model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['binary_accuracy'])
+        early_stopping = keras_callbacks.EarlyStopping(
+            patience=10,
+            min_delta=0.001,
+            restore_best_weights=True,
+        )
 
-    early_stopping = keras_callbacks.EarlyStopping(
-        patience=10,
-        min_delta=0.001,
-        restore_best_weights=True,
-    )
+        history = model.fit(x_train,
+                        y_train,
+                        epochs=wandb.config.epoch_count,
+                        batch_size=wandb.config.batch_size,
+                        callbacks=[WandbCallback()],
+                        validation_data=(x_val, y_val))
 
-    history = model.fit(x_train,
-                    y_train,
-                    epochs=100,
-                    batch_size=16,
-                    callbacks=[early_stopping, WandbCallback()],
-                    validation_data=(x_val, y_val))
+        history_df = pd.DataFrame(history.history)
+        wandb.log({'max_binary_accuracy': history_df['val_binary_accuracy'].max()})
 
-    history_df = pd.DataFrame(history.history)
-    wandb.log({'max_binary_accuracy': history_df['val_binary_accuracy'].max()})
-
-    # history_df.loc[5:, ['loss', 'val_loss']].plot()
-    # history_df.loc[5:, ['binary_accuracy', 'val_binary_accuracy']].plot()
-
-    print(("Best Validation Loss: {:0.4f}" + "\nBest Validation Accuracy: {:0.4f}").format(
-        history_df['val_loss'].min(),
-        history_df['val_binary_accuracy'].max()
-    ))
+        print(("Best Validation Loss: {:0.4f}" + "\nBest Validation Accuracy: {:0.4f}").format(
+            history_df['val_loss'].min(),
+            history_df['val_binary_accuracy'].max()
+        ))
